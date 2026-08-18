@@ -32,6 +32,29 @@ const emojiPicker = (name, options, selected) => `
     </div>
   </div>`;
 
+const diffDot = (level) => `<i class="diff-dot diff-dot--${level}" aria-hidden="true"></i>`;
+
+/* Difficulty sets the suggested point value and, more importantly, how much a
+   full-week streak on this chore is worth. */
+const difficultyPicker = (chore) => {
+  const current = chore.difficulty || 'medium';
+  const active = store.DIFFICULTY.find((d) => d.id === current) || store.DIFFICULTY[1];
+  return `
+    <div class="field" data-difficulty>
+      <span class="field__label">Difficulty</span>
+      <div class="chip-picker">
+        ${store.DIFFICULTY.map((d) => `
+          <label class="chip-picker__opt">
+            <input type="radio" name="difficulty" value="${d.id}" data-suggest="${d.points}"
+              ${d.id === current ? 'checked' : ''}>
+            <span>${diffDot(d.id)}${esc(d.label)}</span>
+          </label>`).join('')}
+      </div>
+      <span class="field__hint" data-diff-hint>${esc(active.hint)}
+        Full-week streak bonus: <strong>+${store.settings().streakBonus[active.id]}%</strong>.</span>
+    </div>`;
+};
+
 const dayPicker = (selected = []) => `
   <div class="field" data-days>
     <span class="field__label">Which days</span>
@@ -299,7 +322,7 @@ function renderManage(sub = 'chores') {
                 <span class="manage-row__emoji">${esc(c.emoji)}</span>
                 <span class="manage-row__body">
                   <strong>${esc(c.title)}</strong>
-                  <em>${esc(store.repeatLabel(c))} · ${esc(who)}</em>
+                  <em>${diffDot(c.difficulty || 'medium')}${esc(store.difficultyOf(c).label)} · ${esc(store.repeatLabel(c))} · ${esc(who)}</em>
                 </span>
                 <span class="manage-row__points">+${pts(c.points)}</span>
               </button>
@@ -363,6 +386,53 @@ function renderManage(sub = 'chores') {
 }
 
 /* --------------------------------------------------------------------------
+   Streak bonus sliders
+   -------------------------------------------------------------------------- */
+
+const SLIDER_MAX = 200;
+
+/** A worked example so the percentage means something concrete. */
+export function bonusExample(level, pct) {
+  const week = level.points * 7;
+  const bonus = Math.round((week * pct) / 100);
+  const article = /^[aeiou]/i.test(level.label) ? 'An' : 'A';
+  return `${article} ${level.label.toLowerCase()} chore worth ${level.points} pts, done every day for a week: `
+    + `${week} pts + ${bonus} bonus = ${week + bonus}.`;
+}
+
+const bonusSlider = (level) => {
+  const pct = store.settings().streakBonus[level.id] ?? level.bonus;
+  return `
+    <div class="slider-row" style="--fill:${(pct / SLIDER_MAX) * 100}%">
+      <div class="slider-row__head">
+        <span class="slider-row__name">${diffDot(level.id)}${esc(level.label)}</span>
+        <output class="slider-row__value" data-bonus-out="${level.id}">+${pct}%</output>
+      </div>
+      <input type="range" min="0" max="${SLIDER_MAX}" step="5" value="${pct}"
+        data-bonus="${level.id}" aria-label="${esc(level.label)} chore streak bonus">
+      <p class="slider-row__example" data-bonus-eg="${level.id}">${esc(bonusExample(level, pct))}</p>
+    </div>`;
+};
+
+/** Live feedback while the thumb is moving — deliberately does not save yet. */
+export function dragBonus(input) {
+  const level = store.DIFFICULTY.find((d) => d.id === input.dataset.bonus);
+  const row = input.closest('.slider-row');
+  if (!level || !row) return;
+  const pct = Number(input.value);
+  row.style.setProperty('--fill', `${(pct / Number(input.max)) * 100}%`);
+  const out = $('[data-bonus-out]', row);
+  const eg = $('[data-bonus-eg]', row);
+  if (out) out.textContent = `+${pct}%`;
+  if (eg) eg.textContent = bonusExample(level, pct);
+}
+
+/** Saved on release, so a re-render never yanks the thumb mid-drag. */
+export function commitBonus(input) {
+  store.setStreakBonus(input.dataset.bonus, Number(input.value));
+}
+
+/* --------------------------------------------------------------------------
    Tab 4 — Settings
    -------------------------------------------------------------------------- */
 
@@ -378,6 +448,16 @@ function renderSettings() {
         <li><button class="settings-row" data-action="week-start">
           <span>Week starts on</span><em>${s.weekStart === 1 ? 'Monday' : 'Sunday'} ›</em></button></li>
       </ul>
+
+      <h3 class="section-title">Streak bonuses</h3>
+      <p class="section-note">When a child does a chore on <strong>every day it is due</strong> in one week,
+        they earn a bonus on top of that chore's points. Harder chores are harder to keep up, so they are
+        worth more. Chores due fewer than ${store.MIN_STREAK_DAYS} days a week can't earn a streak.</p>
+      <div class="card card--sliders">
+        ${store.DIFFICULTY.map(bonusSlider).join('')}
+      </div>
+      <p class="fine-print">Drag to change. Set a level to 0% to switch its bonus off. Changes apply to
+        past weeks too, since bonuses are always recalculated from what actually happened.</p>
 
       <h3 class="section-title">Your data</h3>
       <p class="section-note">Everything is stored on this device only — no account, no server, nothing sent anywhere.</p>
@@ -494,6 +574,7 @@ async function choreEditor(existing) {
     body: `
       ${field('What is it', `<input type="text" name="title" value="${esc(chore.title)}" placeholder="e.g. Feed the dog" maxlength="60" autocomplete="off">`)}
       ${emojiPicker('emoji', store.CHORE_EMOJI, chore.emoji)}
+      ${difficultyPicker(chore)}
       ${field('Points when approved', `<input type="number" name="points" value="${chore.points}" min="0" max="1000" inputmode="numeric">`, 'Bigger jobs deserve more points.')}
       <div class="field">
         <span class="field__label">How often</span>
@@ -517,6 +598,15 @@ async function choreEditor(existing) {
       // Day chooser only makes sense for the "certain days" option.
       $('[data-repeat]', el)?.addEventListener('change', () => {
         $('[data-days-wrap]', el).hidden = readRadio(el, 'repeat') !== 'weekly';
+      });
+      $('[data-difficulty]', el)?.addEventListener('change', (e) => {
+        if (e.target.name !== 'difficulty') return;
+        const level = store.DIFFICULTY.find((d) => d.id === e.target.value);
+        if (!level) return;
+        $('[data-diff-hint]', el).innerHTML =
+          `${esc(level.hint)} Full-week streak bonus: <strong>+${store.settings().streakBonus[level.id]}%</strong>.`;
+        // Only suggest points for a new chore — never overwrite a considered value.
+        if (isNew) $('input[name="points"]', el).value = String(e.target.dataset.suggest);
       });
       $('[data-assignment]', el)?.addEventListener('change', (e) => {
         if (e.target.name === 'assignMode') {
@@ -551,6 +641,7 @@ async function choreEditor(existing) {
     emoji: readRadio(sheet, 'emoji'),
     points: Math.max(0, Number($('input[name="points"]', sheet).value) || 0),
     repeat, days,
+    difficulty: readRadio(sheet, 'difficulty') || 'medium',
     assignment: readAssignment(sheet),
   };
 

@@ -5,7 +5,7 @@
 import * as store from './store.js';
 import { $, esc, pts, plural, toast, buzz } from './util.js';
 import { renderKidScreen, handleKidAction } from './kid.js';
-import { renderParentScreen, renderPinScreen, handleParentAction } from './parent.js';
+import { renderParentScreen, renderPinScreen, handleParentAction, dragBonus, commitBonus } from './parent.js';
 
 const root = $('#app');
 
@@ -250,6 +250,15 @@ function maybeShowInstallHint() {
 store.load();
 store.subscribe(render);
 document.addEventListener('click', onClick);
+
+// Sliders update live while dragging but only save on release, so the
+// re-render that follows can never interrupt the gesture.
+document.addEventListener('input', (e) => {
+  if (e.target.matches?.('[data-bonus]')) dragBonus(e.target);
+});
+document.addEventListener('change', (e) => {
+  if (e.target.matches?.('[data-bonus]')) commitBonus(e.target);
+});
 
 // Keep the number pad usable from a hardware keyboard too.
 document.addEventListener('keydown', (e) => {

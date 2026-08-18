@@ -56,7 +56,7 @@ function kidHeader(kid, subtitle) {
    Tab 1 — Today
    -------------------------------------------------------------------------- */
 
-function choreRow(chore, kid, dateISO) {
+function choreRow(chore, kid, dateISO, streak) {
   const done = store.completionFor(chore.id, kid.id, dateISO);
   const state = done ? done.status : 'todo';
 
@@ -91,7 +91,9 @@ function choreRow(chore, kid, dateISO) {
         <span class="chore__emoji">${esc(chore.emoji)}</span>
         <span class="chore__body">
           <span class="chore__title">${esc(chore.title)}</span>
-          <span class="chore__meta">${esc(store.repeatLabel(chore))}</span>
+          <span class="chore__meta">${esc(store.repeatLabel(chore))}${streak
+            ? ` · 🔥 ${streak.done}/${streak.dueTotal} this week`
+            : ''}</span>
         </span>
         <span class="chore__points">+${pts(chore.points)}</span>
       </button>
@@ -107,6 +109,7 @@ function renderToday(kid) {
 
   const todo = due.filter((c) => !store.completionFor(c.id, kid.id, today));
   const settled = due.filter((c) => store.completionFor(c.id, kid.id, today));
+  const streaks = store.activeStreakMap(kid.id);
 
   const summary = `
     <section class="card card--summary">
@@ -133,9 +136,9 @@ function renderToday(kid) {
        </div>`
     : `
       ${todo.length ? `<h3 class="section-title">To do</h3>
-        <ul class="chore-list">${todo.map((c) => choreRow(c, kid, today)).join('')}</ul>` : ''}
+        <ul class="chore-list">${todo.map((c) => choreRow(c, kid, today, streaks.get(c.id))).join('')}</ul>` : ''}
       ${settled.length ? `<h3 class="section-title">Done today</h3>
-        <ul class="chore-list">${settled.map((c) => choreRow(c, kid, today)).join('')}</ul>` : ''}`;
+        <ul class="chore-list">${settled.map((c) => choreRow(c, kid, today, streaks.get(c.id))).join('')}</ul>` : ''}`;
 
   return `
     ${kidHeader(kid, greeting())}
@@ -230,15 +233,54 @@ function renderRewards(kid) {
    save toward something big is visible instead of resetting every Sunday.
    -------------------------------------------------------------------------- */
 
+function streakRow(s) {
+  const pips = s.days.map((d) => {
+    const state = d.done ? 'is-done' : d.past ? 'is-missed' : d.isToday ? 'is-today' : '';
+    return `<i class="pip ${state}"></i>`;
+  }).join('');
+
+  // Missing a day that has already passed breaks the streak. Not having done
+  // today's yet is just a nudge.
+  const detail = s.complete
+    ? `Perfect week! +${pts(s.bonusPoints)} bonus`
+    : s.broken
+      ? `${s.done} of ${s.dueTotal} days · fresh start next week`
+      : s.todayDue && !s.todayDone
+        ? `${s.done} of ${s.dueTotal} days · do today's to stay on track`
+        : `${s.done} of ${s.dueTotal} days · on track`;
+
+  const state = s.complete ? 'is-complete' : s.broken ? 'is-broken' : 'is-on-track';
+  return `
+    <li class="streak-row ${state}">
+      <span class="streak-row__emoji">${esc(s.emoji)}</span>
+      <span class="streak-row__body">
+        <strong>${esc(s.title)}</strong>
+        <span class="pips">${pips}</span>
+        <em>${detail}</em>
+      </span>
+      <span class="streak-badge diff--${s.difficulty}">+${s.bonusPct}%</span>
+    </li>`;
+}
+
 function renderProgress(kid) {
   const acc = store.accumulation(kid.id);
   const bal = store.balance(kid.id);
   const flame = store.streak(kid.id);
   const goal = store.nextReward(kid.id);
+  const streaks = store.activeStreaks(kid.id);
+  const bonuses = store.weeklyBonuses(kid.id);
 
-  const recent = store.getState().completions
-    .filter((c) => c.kidId === kid.id && c.status !== 'declined')
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  // Chores and earned bonuses share one timeline.
+  const recent = [
+    ...store.getState().completions
+      .filter((c) => c.kidId === kid.id && c.status !== 'declined')
+      .map((c) => ({ kind: 'chore', date: c.date, emoji: c.emoji, title: c.title, points: c.points, status: c.status })),
+    ...bonuses.map((b) => ({
+      kind: 'bonus', date: b.earnedOn, emoji: '🔥',
+      title: `${b.title} — perfect week`, points: b.bonusPoints, status: 'approved',
+    })),
+  ]
+    .sort((a, b) => b.date.localeCompare(a.date) || (a.kind === 'bonus' ? -1 : 1))
     .slice(0, 12);
 
   return `
@@ -256,7 +298,14 @@ function renderProgress(kid) {
         <div class="stat"><em>This month</em><strong>${pts(acc.month)}</strong></div>
         <div class="stat"><em>This year</em><strong>${pts(acc.year)}</strong></div>
         <div class="stat"><em>Day streak</em><strong>${flame} 🔥</strong></div>
+        <div class="stat"><em>Bonus points</em><strong>${pts(store.bonusPointsTotal(kid.id))}</strong></div>
+        <div class="stat"><em>Perfect weeks</em><strong>${bonuses.length}</strong></div>
       </div>
+
+      ${streaks.length ? `
+        <h3 class="section-title">This week's streaks</h3>
+        <p class="section-note">Do a chore every day it's due and you earn bonus points on top.</p>
+        <ul class="streak-list">${streaks.map(streakRow).join('')}</ul>` : ''}
 
       ${goal ? `
         <h3 class="section-title">Saving toward</h3>
@@ -273,7 +322,7 @@ function renderProgress(kid) {
       ${recent.length ? `
         <ul class="mini-list">
           ${recent.map((c) => `
-            <li class="mini">
+            <li class="mini ${c.kind === 'bonus' ? 'mini--bonus' : ''}">
               <span class="mini__emoji">${esc(c.emoji)}</span>
               <span class="mini__body">
                 <strong>${esc(c.title)}</strong>

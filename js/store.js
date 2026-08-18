@@ -6,7 +6,7 @@
    duties and means the family's chore history never leaves the phone.
    ========================================================================== */
 
-import { uid, todayISO, toISO, fromISO, addDays, startOfWeek, startOfMonth, startOfYear } from './util.js';
+import { uid, clamp, todayISO, toISO, fromISO, addDays, startOfWeek, startOfMonth, startOfYear } from './util.js';
 
 const STORAGE_KEY = 'chorequest.v1';
 
@@ -23,6 +23,25 @@ export const AVATARS = ['🦊', '🐼', '🐯', '🦄', '🐨', '🐧', '🐸', 
 
 export const CHORE_EMOJI = ['🧹', '🍽️', '🛏️', '🗑️', '🧺', '🐕', '📚', '🦷', '🚿', '🧸', '🌱', '🚗', '✏️', '🧼', '🍳', '♻️'];
 
+/**
+ * Difficulty drives two things: a suggested point value, and how big the
+ * full-week streak bonus is. Harder chores are harder to keep up every single
+ * day, so sustaining one for a week is worth proportionally more.
+ */
+export const DIFFICULTY = [
+  { id: 'easy', label: 'Easy', points: 5, bonus: 10,
+    hint: 'A minute or two, barely a chore — make the bed, feed the cat.' },
+  { id: 'medium', label: 'Medium', points: 10, bonus: 25,
+    hint: 'Ten minutes of real effort — clear the table, homework.' },
+  { id: 'hard', label: 'Hard', points: 20, bonus: 50,
+    hint: 'Half an hour, or something they resist — tidy the whole room.' },
+  { id: 'extreme', label: 'Extreme', points: 40, bonus: 100,
+    hint: 'The big one — mow the lawn, deep-clean the bathroom.' },
+];
+
+export const difficultyOf = (chore) =>
+  DIFFICULTY.find((d) => d.id === (chore?.difficulty || 'medium')) || DIFFICULTY[1];
+
 export const REWARD_EMOJI = ['🎁', '🎮', '🍿', '🎬', '🍦', '🛝', '📱', '🎧', '👟', '🧱', '🎨', '🎟️', '🍕', '📖', '⚽', '💎'];
 
 /* Gift-card brands a parent can pick from. The app never sells or delivers a
@@ -35,13 +54,13 @@ export const GIFT_BRANDS = [
 ];
 
 const STARTER_CHORES = [
-  { title: 'Make your bed', emoji: '🛏️', points: 5, repeat: 'daily' },
-  { title: 'Brush teeth (morning & night)', emoji: '🦷', points: 5, repeat: 'daily' },
-  { title: 'Clear the dinner table', emoji: '🍽️', points: 10, repeat: 'daily' },
-  { title: 'Homework done', emoji: '📚', points: 15, repeat: 'weekly', days: [1, 2, 3, 4, 5] },
-  { title: 'Tidy your room', emoji: '🧸', points: 20, repeat: 'weekly', days: [6] },
-  { title: 'Take out the recycling', emoji: '♻️', points: 15, repeat: 'weekly', days: [0] },
-  { title: 'Help with laundry', emoji: '🧺', points: 15, repeat: 'weekly', days: [3] },
+  { title: 'Make your bed', emoji: '🛏️', points: 5, repeat: 'daily', difficulty: 'easy' },
+  { title: 'Brush teeth (morning & night)', emoji: '🦷', points: 5, repeat: 'daily', difficulty: 'easy' },
+  { title: 'Clear the dinner table', emoji: '🍽️', points: 10, repeat: 'daily', difficulty: 'medium' },
+  { title: 'Homework done', emoji: '📚', points: 15, repeat: 'weekly', days: [1, 2, 3, 4, 5], difficulty: 'medium' },
+  { title: 'Tidy your room', emoji: '🧸', points: 20, repeat: 'weekly', days: [6], difficulty: 'hard' },
+  { title: 'Take out the recycling', emoji: '♻️', points: 15, repeat: 'weekly', days: [0], difficulty: 'medium' },
+  { title: 'Help with laundry', emoji: '🧺', points: 15, repeat: 'weekly', days: [3], difficulty: 'medium' },
 ];
 
 const STARTER_REWARDS = [
@@ -58,12 +77,16 @@ function seedState() {
   return {
     version: 1,
     createdAt: now,
-    settings: { pin: '', weekStart: 0, seenIntro: false },
+    settings: {
+      pin: '', weekStart: 0, seenIntro: false,
+      // Percentage added on top of a chore's weekly points for a perfect week.
+      streakBonus: Object.fromEntries(DIFFICULTY.map((d) => [d.id, d.bonus])),
+    },
     kids: [],
     chores: STARTER_CHORES.map((c, i) => ({
       id: uid('chore'), title: c.title, emoji: c.emoji, points: c.points,
       repeat: c.repeat, days: c.days || [], assignment: 'all',
-      archived: false, order: i, createdAt: now,
+      difficulty: c.difficulty, archived: false, order: i, createdAt: now,
     })),
     rewards: STARTER_REWARDS.map((r, i) => ({
       id: uid('reward'), title: r.title, emoji: r.emoji, cost: r.cost,
@@ -82,12 +105,35 @@ function seedState() {
 let state = seedState();
 const listeners = new Set();
 
+/* Streak bonuses are recomputed from history rather than stored, so they stay
+   correct when a parent approves late or changes their mind. That scan is
+   memoised against a revision counter so it runs once per change, not once
+   per render. */
+let revision = 0;
+let memoRev = -1;
+const memoCache = new Map();
+
+function memo(key, compute) {
+  if (memoRev !== revision) { memoCache.clear(); memoRev = revision; }
+  if (!memoCache.has(key)) memoCache.set(key, compute());
+  return memoCache.get(key);
+}
+
 export function load() {
+  revision += 1;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      state = { ...seedState(), ...parsed, settings: { ...seedState().settings, ...(parsed.settings || {}) } };
+      const base = seedState();
+      state = {
+        ...base, ...parsed,
+        settings: {
+          ...base.settings,
+          ...(parsed.settings || {}),
+          streakBonus: { ...base.settings.streakBonus, ...((parsed.settings || {}).streakBonus || {}) },
+        },
+      };
     }
   } catch (err) {
     console.warn('ChoreQuest: could not read saved data, starting fresh.', err);
@@ -111,6 +157,7 @@ export function subscribe(fn) {
 }
 
 function commit() {
+  revision += 1;
   persist();
   listeners.forEach((fn) => fn(state));
 }
@@ -180,6 +227,7 @@ export function addChore(data) {
     repeat: data.repeat || 'daily',
     days: data.days || [],
     assignment: data.assignment || 'all',
+    difficulty: data.difficulty || 'medium',
     archived: false,
     order: state.chores.length,
     createdAt: new Date().toISOString(),
@@ -199,7 +247,11 @@ export function updateChore(id, patch) {
 export function archiveChore(id) {
   update((s) => {
     const chore = s.chores.find((c) => c.id === id);
-    if (chore) chore.archived = true;
+    if (!chore) return;
+    chore.archived = true;
+    // Recorded so past streaks stay intact: days after this date simply stop
+    // counting, rather than breaking a week the child actually completed.
+    chore.archivedAt = new Date().toISOString();
   });
 }
 
@@ -388,12 +440,160 @@ export const redemptionsFor = (kidId) =>
   state.redemptions.filter((r) => r.kidId === kidId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
 /* --------------------------------------------------------------------------
+   Weekly streak bonuses.
+
+   A "perfect week" means the child did a chore on every single day it was due
+   that week. That earns a bonus on top of the points already banked for it,
+   sized by the chore's difficulty. Bonuses are derived from history, never
+   stored, so approving late or declining afterwards always settles correctly.
+   -------------------------------------------------------------------------- */
+
+/** Below this many scheduled days a week, finishing isn't a streak. */
+export const MIN_STREAK_DAYS = 3;
+
+/** Schedule-only check — deliberately ignores completions, unlike isChoreDue. */
+function isScheduledOn(chore, dateISO) {
+  if (chore.repeat === 'daily') return true;
+  if (chore.repeat === 'weekly') return (chore.days || []).includes(fromISO(dateISO).getDay());
+  return false;   // a one-off chore cannot build a streak
+}
+
+export const streakBonusPct = (chore) => {
+  const level = chore.difficulty || 'medium';
+  const configured = (state.settings.streakBonus || {})[level];
+  return Number(configured ?? difficultyOf(chore).bonus ?? 0);
+};
+
+function approvedIndex(kidId) {
+  return memo(`idx:${kidId}`, () => {
+    const map = new Map();
+    state.completions.forEach((c) => {
+      if (c.kidId === kidId && c.status === 'approved') map.set(`${c.choreId}|${c.date}`, c);
+    });
+    return map;
+  });
+}
+
+/**
+ * How one chore's streak stands for one kid in one week.
+ * `dueTotal` spans the whole week; `dueSoFar` stops at today, so the current
+ * week can show honest progress without counting days that haven't happened.
+ */
+export function choreWeekStreak(chore, kidId, weekStart, index = approvedIndex(kidId)) {
+  const today = todayISO();
+  const bornOn = (chore.createdAt || '').slice(0, 10);
+  const retiredOn = chore.archivedAt ? chore.archivedAt.slice(0, 10) : null;
+
+  const dueAll = [];
+  const dueSoFar = [];
+  for (let i = 0; i < 7; i += 1) {
+    const iso = toISO(addDays(weekStart, i));
+    if (bornOn && iso < bornOn) continue;        // before the chore existed
+    if (retiredOn && iso > retiredOn) break;     // after it was retired
+    if (!isScheduledOn(chore, iso)) continue;
+    dueAll.push(iso);
+    if (iso <= today) dueSoFar.push(iso);
+  }
+
+  const doneDays = dueSoFar.filter((iso) => index.has(`${chore.id}|${iso}`));
+  const basePoints = doneDays.reduce((sum, iso) => sum + index.get(`${chore.id}|${iso}`).points, 0);
+  const bonusPct = streakBonusPct(chore);
+  const eligible = isAssignedTo(chore, kidId) && dueAll.length >= MIN_STREAK_DAYS;
+  const complete = eligible && doneDays.length === dueAll.length;
+
+  // Per-day detail, so the UI can show which day was actually missed rather
+  // than just a count.
+  const days = dueAll.map((iso) => ({
+    date: iso,
+    done: index.has(`${chore.id}|${iso}`),
+    past: iso < today,
+    isToday: iso === today,
+  }));
+
+  // Only a missed day that has already passed breaks a streak. Not having done
+  // today's chore yet is not a failure — the day isn't over.
+  const missedPast = days.filter((d) => d.past && !d.done).length;
+  const todayEntry = days.find((d) => d.isToday) || null;
+
+  return {
+    choreId: chore.id,
+    title: chore.title,
+    emoji: chore.emoji,
+    difficulty: chore.difficulty || 'medium',
+    weekStart: toISO(weekStart),
+    dueTotal: dueAll.length,
+    dueSoFar: dueSoFar.length,
+    done: doneDays.length,
+    days,
+    eligible,
+    complete,
+    broken: eligible && missedPast > 0,
+    todayDue: Boolean(todayEntry),
+    todayDone: Boolean(todayEntry?.done),
+    onTrack: eligible && missedPast === 0,
+    basePoints,
+    bonusPct,
+    bonusPoints: complete ? Math.round((basePoints * bonusPct) / 100) : 0,
+    // Credited on the last day the chore was due, which is when it was earned.
+    earnedOn: dueAll.length ? dueAll[dueAll.length - 1] : null,
+  };
+}
+
+/** Every perfect week this child has ever put together. */
+export function weeklyBonuses(kidId) {
+  return memo(`bonus:${kidId}`, () => {
+    const approved = state.completions.filter((c) => c.kidId === kidId && c.status === 'approved');
+    if (!approved.length) return [];
+
+    const index = approvedIndex(kidId);
+    const earliest = approved.reduce((min, c) => (c.date < min ? c.date : min), approved[0].date);
+    let cursor = startOfWeek(fromISO(earliest), state.settings.weekStart);
+    const lastWeek = startOfWeek(new Date(), state.settings.weekStart);
+
+    const earned = [];
+    let guard = 0;
+    while (cursor <= lastWeek && guard < 520) {   // ~10 years, a runaway guard
+      guard += 1;
+      // Archived chores are included: a week already completed keeps its bonus.
+      state.chores.forEach((chore) => {
+        const streak = choreWeekStreak(chore, kidId, cursor, index);
+        if (streak.complete && streak.bonusPoints > 0) earned.push(streak);
+      });
+      cursor = addDays(cursor, 7);
+    }
+    return earned;
+  });
+}
+
+export const bonusPointsTotal = (kidId) =>
+  weeklyBonuses(kidId).reduce((sum, b) => sum + b.bonusPoints, 0);
+
+/** This week's streaks, live, for the child's Progress screen. */
+export function activeStreaks(kidId) {
+  const weekStart = startOfWeek(new Date(), state.settings.weekStart);
+  const index = approvedIndex(kidId);
+  return state.chores
+    .filter((c) => !c.archived && isAssignedTo(c, kidId))
+    .map((c) => choreWeekStreak(c, kidId, weekStart, index))
+    .filter((s) => s.eligible)
+    .sort((a, b) => (b.done / b.dueTotal) - (a.done / a.dueTotal) || b.bonusPct - a.bonusPct);
+}
+
+/** Keyed by chore id, for decorating the Today list. */
+export function activeStreakMap(kidId) {
+  return new Map(activeStreaks(kidId).map((s) => [s.choreId, s]));
+}
+
+/* --------------------------------------------------------------------------
    The points maths
    -------------------------------------------------------------------------- */
 
-/** Lifetime approved points — the number that never goes down. */
-export const lifetimePoints = (kidId) =>
+/** Points from approved chores alone, before any streak bonus. */
+export const basePointsEarned = (kidId) =>
   approvedCompletions(kidId).reduce((sum, c) => sum + c.points, 0);
+
+/** Lifetime points — chores plus streak bonuses. Never goes down. */
+export const lifetimePoints = (kidId) => basePointsEarned(kidId) + bonusPointsTotal(kidId);
 
 export const spentPoints = (kidId) =>
   state.redemptions
@@ -405,9 +605,13 @@ export const balance = (kidId) => lifetimePoints(kidId) - spentPoints(kidId);
 
 export function pointsEarnedSince(kidId, startDate) {
   const startISO = toISO(startDate);
-  return approvedCompletions(kidId)
+  const base = approvedCompletions(kidId)
     .filter((c) => c.date >= startISO)
     .reduce((sum, c) => sum + c.points, 0);
+  const bonus = weeklyBonuses(kidId)
+    .filter((b) => b.earnedOn && b.earnedOn >= startISO)
+    .reduce((sum, b) => sum + b.bonusPoints, 0);
+  return base + bonus;
 }
 
 /**
@@ -458,6 +662,15 @@ export function nextReward(kidId) {
    -------------------------------------------------------------------------- */
 
 export const settings = () => state.settings;
+
+export function setStreakBonus(level, pct) {
+  update((s) => {
+    s.settings.streakBonus = {
+      ...(s.settings.streakBonus || {}),
+      [level]: clamp(Math.round(Number(pct) || 0), 0, 200),
+    };
+  });
+}
 
 export function setSettings(patch) {
   update((s) => Object.assign(s.settings, patch));

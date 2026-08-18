@@ -20,9 +20,48 @@ or converts points straight to cash. ChoreQuest shows *this week*, *this month*
 and *this year* side by side, and the spendable balance never resets. Saving for
 six months toward something big is the point, not a side effect.
 
+**Consistency is paid for separately.** Points reward doing a chore once.
+A *streak bonus* rewards doing it every single day it was due, all week — and
+because harder chores are harder to sustain, the bonus scales with difficulty.
+
 **The child chooses the reward.** The parent stocks the store and sets the
 prices; the kid browses it, sees exactly how far off each item is, and decides
 what to spend on. That is a shop, not a payout.
+
+## Difficulty and streak bonuses
+
+Every chore is rated **Easy, Medium, Hard or Extreme**. The rating does two
+things: it suggests a point value, and it sets how much a perfect week is worth.
+
+| Level | Suggested points | Default bonus | Roughly |
+|---|---|---|---|
+| 🟢 Easy | 5 | +10% | A minute or two — make the bed, feed the cat |
+| 🔵 Medium | 10 | +25% | Ten minutes of real effort — clear the table, homework |
+| 🟠 Hard | 20 | +50% | Half an hour, or something they resist — tidy the whole room |
+| 🔴 Extreme | 40 | +100% | The big one — mow the lawn, deep-clean the bathroom |
+
+A **perfect week** means the chore was done on *every day it was due* that week.
+It then pays out that chore's points for the week plus the bonus percentage. A
+Medium chore worth 10 points done all seven days earns 70 + 18 = **88**.
+
+Drag the sliders in **Parent mode → Settings → Streak bonuses** to reprice any
+level from 0% to 200%. The sliders update live as you drag and save when you let
+go. Because bonuses are recalculated from history rather than stored, changing a
+rate immediately reprices past weeks too.
+
+Rules that keep it honest:
+
+- A chore due fewer than **3 days a week** can't earn a streak — otherwise a
+  once-a-week chore would collect a bonus for being done once.
+- One-off chores never streak.
+- A day only counts once a parent has **approved** it.
+- Missing a day that has **already passed** breaks the streak. Not having done
+  *today's* yet does not — the app says "do today's to stay on track" instead.
+- Archiving a chore doesn't erase a week the child already completed.
+- The bonus lands when the week's last due day is done and approved.
+
+Kids see this on their **Progress** tab as a row per chore with one pip per due
+day — filled for done, hollow red for missed, outlined for still to come.
 
 ## How gift cards work
 
@@ -92,6 +131,7 @@ iOS Safari.
 | **Spendable balance** | Lifetime approved points − points spent on requested or fulfilled redemptions. |
 | **Declined redemption** | Refunds automatically (declined redemptions are excluded from the spend total). |
 | **Streak** | Consecutive days with at least one approved chore. Today not being done yet does not break it. |
+| **Streak bonus** | Recalculated from history, never stored — so late approvals, declines and changed rates all settle correctly. |
 | **Deleting a chore** | Archives it. Points already earned from it stay put. |
 | **Deleting a child** | Removes their history with them. |
 
@@ -113,6 +153,12 @@ iOS Safari.
 ```
 
 `store.js` holds every rule about points; the view modules only read from it.
+
+Run the maths checks with:
+
+```bash
+node test/streaks.test.mjs
+```
 
 ## Deploying to GitHub Pages
 
