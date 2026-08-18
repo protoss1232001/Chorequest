@@ -1,0 +1,17 @@
+{
+  "name": "ChoreQuest — Chores, Points & Rewards",
+  "short_name": "ChoreQuest",
+  "description": "A family chore list where kids earn points that accumulate across the week, month and year, then choose their own reward.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b0b10",
+  "theme_color": "#7d5fff",
+  "categories": ["lifestyle", "productivity", "education"],
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
