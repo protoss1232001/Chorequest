@@ -111,17 +111,21 @@ function readAssignment(root) {
    is deliberately not presented as real security.
    -------------------------------------------------------------------------- */
 
-export function renderPinScreen(buffer, mode, error) {
+export function renderPinScreen({ buffer, mode, error, target }, kid = null) {
+  const forKid = Boolean(target) && Boolean(kid);
   const creating = mode === 'create' || mode === 'confirm';
+
   const titles = {
     create: 'Choose a parent PIN',
     confirm: 'Enter it once more',
-    enter: 'Parent mode',
+    enter: forKid ? `${kid.name}'s profile` : 'Parent mode',
   };
   const subtitles = {
     create: 'Four digits. Kids will need this to change chores or rewards.',
     confirm: 'Just to be sure you can remember it.',
-    enter: 'Enter your PIN to manage chores, kids and rewards.',
+    enter: forKid
+      ? 'Type your PIN to see your chores.'
+      : 'Enter your PIN to manage chores, kids and rewards.',
   };
 
   const dots = Array.from({ length: 4 }, (_, i) =>
@@ -130,14 +134,16 @@ export function renderPinScreen(buffer, mode, error) {
   const keys = [1, 2, 3, 4, 5, 6, 7, 8, 9, null, 0, 'del'];
 
   return `
-    <div class="screen screen--pin">
+    <div class="screen screen--pin" ${forKid ? `style="--accent:${store.kidColorHex(kid)}"` : ''}>
       <header class="pin-head">
         <button class="link-btn" data-action="switch-profile">Cancel</button>
       </header>
       <div class="pin-body">
-        <span class="pin-lock">${creating ? '🔐' : '🔒'}</span>
-        <h1>${titles[mode]}</h1>
-        <p>${subtitles[mode]}</p>
+        ${forKid
+          ? `<span class="avatar avatar--lg pin-avatar">${esc(kid.avatar)}</span>`
+          : `<span class="pin-lock">${creating ? '🔐' : '🔒'}</span>`}
+        <h1>${esc(titles[mode])}</h1>
+        <p>${esc(subtitles[mode])}</p>
         <div class="pin-dots ${error ? 'is-error' : ''}">${dots}</div>
         ${error ? `<p class="pin-error">${esc(error)}</p>` : ''}
       </div>
@@ -364,7 +370,7 @@ function renderManage(sub = 'chores') {
               <span class="manage-row__emoji">${esc(k.avatar)}</span>
               <span class="manage-row__body">
                 <strong>${esc(k.name)}</strong>
-                <em>${pts(store.balance(k.id))} points · ${pts(store.lifetimePoints(k.id))} earned all time</em>
+                <em>${pts(store.balance(k.id))} points · ${pts(store.lifetimePoints(k.id))} earned all time${k.pin ? ' · 🔒 Locked' : ''}</em>
               </span>
               <span class="manage-row__chev">›</span>
             </button>
@@ -535,6 +541,11 @@ async function kidEditor(existing) {
             </label>`).join('')}
         </div>
       </div>
+      ${field('Profile lock (optional)',
+        `<input type="text" name="kidPin" value="${esc(kid.pin || '')}" inputmode="numeric"
+          pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="No lock — anyone can open it">`,
+        'A 4-digit PIN this child types to open their own profile, so siblings can\'t tick off '
+        + 'their chores or spend their points. Leave blank for no lock. Your parent PIN opens every profile.')}
       ${isNew ? '' : `<button type="button" class="btn btn--danger btn--block" data-sheet-action="delete">Remove ${esc(kid.name)}</button>`}`,
     actions: [
       { id: 'save', label: isNew ? 'Add child' : 'Save', tone: 'primary' },
@@ -558,7 +569,19 @@ async function kidEditor(existing) {
 
   const name = $('input[name="name"]', sheet).value.trim();
   if (!name) { toast('Please enter a name', 'warn'); return; }
-  const patch = { name, avatar: readRadio(sheet, 'avatar'), color: readRadio(sheet, 'colour') };
+
+  const kidPin = $('input[name="kidPin"]', sheet).value.trim();
+  if (kidPin && !/^\d{4}$/.test(kidPin)) {
+    toast('A profile lock must be exactly 4 digits', 'warn');
+    return;
+  }
+
+  const patch = {
+    name,
+    avatar: readRadio(sheet, 'avatar'),
+    color: readRadio(sheet, 'colour'),
+    pin: kidPin,
+  };
 
   if (isNew) { store.addKid(patch); toast(`${name} added 🎉`, 'success'); }
   else { store.updateKid(kid.id, patch); toast('Saved', 'success'); }

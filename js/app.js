@@ -17,7 +17,8 @@ const route = {
   manageSub: 'chores',
 };
 
-const pin = { buffer: '', mode: 'enter', error: '', first: '', afterUnlock: 'parent' };
+// target: null unlocks parent mode, otherwise it holds the kid id being opened.
+const pin = { buffer: '', mode: 'enter', error: '', first: '', target: null };
 
 /* --------------------------------------------------------------------------
    Profile switcher — the front door. Kids tap their face, parents tap Parent.
@@ -62,6 +63,7 @@ function renderSwitcher() {
               <li>
                 <button class="profile" data-action="open-kid" data-id="${kid.id}"
                   style="--kid-accent:${store.kidColorHex(kid)}">
+                  ${store.kidHasPin(kid.id) ? '<span class="profile__lock" title="Locked">🔒</span>' : ''}
                   <span class="avatar avatar--lg">${esc(kid.avatar)}</span>
                   <strong>${esc(kid.name)}</strong>
                   <em>${pts(bal)} points</em>
@@ -95,10 +97,14 @@ function render() {
     route.screen = 'switcher';
     route.kidId = null;
   }
+  if (route.screen === 'pin' && pin.target && !store.getKid(pin.target)) {
+    pin.target = null;
+    route.screen = 'switcher';
+  }
 
   let html;
   if (route.screen === 'kid') html = renderKidScreen(route.kidId, route.kidTab);
-  else if (route.screen === 'pin') html = renderPinScreen(pin.buffer, pin.mode, pin.error);
+  else if (route.screen === 'pin') html = renderPinScreen(pin, pin.target ? store.getKid(pin.target) : null);
   else if (route.screen === 'parent') html = renderParentScreen(route.parentTab, route.manageSub);
   else html = renderSwitcher();
 
@@ -128,7 +134,27 @@ function startParentMode() {
   pin.buffer = '';
   pin.error = '';
   pin.first = '';
+  pin.target = null;
   pin.mode = store.hasPin() ? 'enter' : 'create';
+  route.screen = 'pin';
+  render();
+}
+
+function openKid(kidId) {
+  route.screen = 'kid';
+  route.kidId = kidId;
+  route.kidTab = 'today';
+  render();
+}
+
+/** Locked profiles ask for a PIN first; unlocked ones open straight away. */
+function startKidUnlock(kidId) {
+  if (!store.kidHasPin(kidId)) { openKid(kidId); return; }
+  pin.buffer = '';
+  pin.error = '';
+  pin.first = '';
+  pin.target = kidId;
+  pin.mode = 'enter';
   route.screen = 'pin';
   render();
 }
@@ -143,7 +169,18 @@ function pinDigit(digit) {
 
   const entered = pin.buffer;
 
-  if (pin.mode === 'enter') {
+  if (pin.mode === 'enter' && pin.target) {
+    if (store.checkKidPin(pin.target, entered)) {
+      const kidId = pin.target;
+      pin.buffer = '';
+      pin.target = null;
+      openKid(kidId);
+      return;
+    }
+    pin.buffer = '';
+    pin.error = 'That PIN did not match. Try again.';
+    buzz([40, 60, 40]);
+  } else if (pin.mode === 'enter') {
     if (store.checkPin(entered)) {
       pin.buffer = '';
       route.screen = 'parent';
@@ -191,10 +228,9 @@ async function onClick(event) {
     case 'switch-profile': goHome(); return;
     case 'parent-mode': startParentMode(); return;
     case 'open-kid':
-      route.screen = 'kid';
-      route.kidId = el.dataset.id;
-      route.kidTab = 'today';
-      render();
+      // A parent is already past a PIN, so don't challenge them again.
+      if (route.screen === 'parent') openKid(el.dataset.id);
+      else startKidUnlock(el.dataset.id);
       return;
     case 'kid-tab': route.kidTab = el.dataset.tab; render(); return;
     case 'parent-tab': route.parentTab = el.dataset.tab; render(); return;
@@ -202,7 +238,7 @@ async function onClick(event) {
     case 'pin-key': pinDigit(el.dataset.key); return;
     case 'pin-del': pin.buffer = pin.buffer.slice(0, -1); pin.error = ''; render(); return;
     case 'change-pin':
-      pin.buffer = ''; pin.first = ''; pin.error = ''; pin.mode = 'create';
+      pin.buffer = ''; pin.first = ''; pin.error = ''; pin.mode = 'create'; pin.target = null;
       route.screen = 'pin';
       render();
       return;

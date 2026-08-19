@@ -175,12 +175,13 @@ function update(mutator) {
 export const kids = () => state.kids;
 export const getKid = (id) => state.kids.find((k) => k.id === id) || null;
 
-export function addKid({ name, avatar, color }) {
+export function addKid({ name, avatar, color, pin }) {
   const kid = {
     id: uid('kid'),
     name: name.trim(),
     avatar: avatar || AVATARS[state.kids.length % AVATARS.length],
     color: color || KID_COLORS[state.kids.length % KID_COLORS.length].id,
+    pin: pin || '',
     createdAt: new Date().toISOString(),
   };
   update((s) => s.kids.push(kid));
@@ -206,6 +207,19 @@ export function removeKid(id) {
       }
     });
   });
+}
+
+export const kidHasPin = (id) => Boolean(getKid(id)?.pin);
+
+/**
+ * A child's own PIN opens their profile — and so does the parent PIN, which
+ * acts as a master key so a forgotten kid PIN never locks anyone out.
+ */
+export function checkKidPin(id, code) {
+  const kid = getKid(id);
+  if (!kid) return false;
+  if (kid.pin && kid.pin === code) return true;
+  return Boolean(state.settings.pin) && state.settings.pin === code;
 }
 
 export const kidColorHex = (kid) =>

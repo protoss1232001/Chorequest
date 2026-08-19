@@ -63,6 +63,23 @@ Rules that keep it honest:
 Kids see this on their **Progress** tab as a row per chore with one pip per due
 day — filled for done, hollow red for missed, outlined for still to come.
 
+## Profile locks
+
+Each child can optionally be given their own **4-digit profile lock**, set by
+the parent in **Manage → Kids**. Without one, anyone can tap any profile — fine
+for a single child or trusting siblings, less so otherwise, since an unlocked
+profile lets a sibling tick off someone else's chores or spend their points.
+
+- Leave the field blank for no lock.
+- A locked profile shows a 🔒 on the switcher and asks for its PIN on the way in.
+- **The parent PIN opens every profile**, so a forgotten child PIN never locks
+  anyone out.
+- A parent already inside Parent mode is not challenged again when they tap a
+  child from the dashboard.
+
+Like the parent PIN, this is a deterrent between siblings, not security — see
+*Known limits*.
+
 ## How gift cards work
 
 ChoreQuest **never buys, sells, stores or delivers a gift card.** When a child
@@ -117,7 +134,8 @@ iOS Safari.
 1. Tap **Get started** and choose a 4-digit parent PIN.
    The PIN is a soft lock to keep kids out of the settings — it is not
    encryption, and it is stored in plain text alongside everything else.
-2. Add each child (name, avatar, colour).
+2. Add each child (name, avatar, colour) — and optionally a 4-digit profile
+   lock so siblings can't open each other's profiles.
 3. Seven starter chores and six starter rewards are pre-loaded — edit, delete or
    add to them under **Manage**.
 4. Hand the phone to a child: **Exit** → tap their face.
@@ -134,6 +152,7 @@ iOS Safari.
 | **Streak bonus** | Recalculated from history, never stored — so late approvals, declines and changed rates all settle correctly. |
 | **Deleting a chore** | Archives it. Points already earned from it stay put. |
 | **Deleting a child** | Removes their history with them. |
+| **Profile lock** | Optional per child. The parent PIN is a master key for every profile. |
 
 ## Layout
 
@@ -179,7 +198,9 @@ Because every path in the app is relative, it works from a subdirectory like
 
 - **One device.** No sync between a parent's phone and a child's. Backup and
   restore move data manually.
-- **The PIN is not security.** It stops a curious eight-year-old, nothing more.
+- **The PINs are not security.** Both the parent PIN and the profile locks are
+  stored in plain text alongside everything else. They stop a curious
+  eight-year-old, nothing more.
 - **Clearing Safari's website data erases everything.** Take a backup first.
   (Installing to the Home Screen makes this considerably less likely.)
 - **No notifications.** iOS web apps can do push when installed, but it is not

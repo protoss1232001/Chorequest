@@ -1069,3 +1069,13 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 .streak-row.is-broken { border-left-color: var(--surface-sunk); opacity: 0.82; }
 .pip.is-missed { background: transparent; border-color: color-mix(in srgb, var(--red) 45%, transparent); }
 .pip.is-today { background: transparent; border-color: var(--kid-accent); }
+
+/* Per-kid profile locks */
+.profile { position: relative; }
+.profile__lock {
+  position: absolute;
+  top: 10px; right: 12px;
+  font-size: 13px;
+  opacity: 0.5;
+}
+.pin-avatar { margin: 0 auto; box-shadow: var(--shadow); }
