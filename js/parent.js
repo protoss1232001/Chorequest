@@ -220,6 +220,25 @@ function renderParentHome() {
           <div><strong>All caught up</strong><em>Nothing waiting for your approval.</em></div>
         </div>`}
 
+      ${(() => {
+        const rows = list
+          .map((k) => ({ kid: k, r: store.lastWeekRecap(k.id) }))
+          .filter(({ r }) => r.points > 0);
+        if (!rows.length) return '';
+        return `
+          <h3 class="section-title">Last week</h3>
+          <div class="card card--recap">
+            ${rows.map(({ kid, r }) => `
+              <div class="recap-row">
+                <span class="recap-row__avatar">${esc(kid.avatar)}</span>
+                <span class="recap-row__name">${esc(kid.name)}</span>
+                <span class="recap-row__stats">${pts(r.points)} pts${r.perfect
+                  ? ` · ${plural(r.perfect, 'perfect week', 'perfect weeks')} ⭐`
+                  : ''}${r.bonus ? ` · +${pts(r.bonus)} bonus` : ''}</span>
+              </div>`).join('')}
+          </div>`;
+      })()}
+
       <h3 class="section-title">Kids</h3>
       ${list.length ? `<ul class="kid-list">${list.map(kidSummaryCard).join('')}</ul>` : `
         <div class="empty">
@@ -478,6 +497,8 @@ function renderSettings() {
         ChoreQuest keeps a chore list, awards points, and lets kids choose rewards you have stocked.
         Points accumulate across the week, month and year so children can save toward something bigger.
         The app does not sell, buy or deliver gift cards — you fulfil each request yourself.
+        <a href="./privacy.html" target="_blank" rel="noopener">Privacy policy</a> — the short
+        version: nothing ever leaves this device.
       </p>
     </div>`;
 }
@@ -546,13 +567,28 @@ async function kidEditor(existing) {
           pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="No lock — anyone can open it">`,
         'A 4-digit PIN this child types to open their own profile, so siblings can\'t tick off '
         + 'their chores or spend their points. Leave blank for no lock. Your parent PIN opens every profile.')}
-      ${isNew ? '' : `<button type="button" class="btn btn--danger btn--block" data-sheet-action="delete">Remove ${esc(kid.name)}</button>`}`,
+      ${isNew ? '' : `
+        <div class="field">
+          <span class="field__label">Streak savers</span>
+          <button type="button" class="btn btn--plain btn--block" data-sheet-action="grant-saver">
+            🛟 Give a streak saver${store.saversAvailable(kid.id) ? ` (has ${store.saversAvailable(kid.id)})` : ''}
+          </button>
+          <span class="field__hint">A saver repairs one missed day so a streak survives.
+            Kids also earn one automatically for every flawless week.</span>
+        </div>
+        <button type="button" class="btn btn--danger btn--block" data-sheet-action="delete">Remove ${esc(kid.name)}</button>`}`,
     actions: [
       { id: 'save', label: isNew ? 'Add child' : 'Save', tone: 'primary' },
       { id: 'cancel', label: 'Cancel', tone: 'plain' },
     ],
     onMount: (el) => { sheet = el; },
   });
+
+  if (answer === 'grant-saver') {
+    store.grantSaver(kid.id);
+    toast(`Streak saver given to ${kid.name} 🛟`, 'success');
+    return;
+  }
 
   if (answer === 'delete') {
     const sure = await confirmSheet({

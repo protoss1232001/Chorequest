@@ -100,6 +100,23 @@ function choreRow(chore, kid, dateISO, streak) {
     </li>`;
 }
 
+function celebrationBanner(kid) {
+  const fresh = store.unseenBonuses(kid.id);
+  if (!fresh.length) return '';
+  const total = fresh.reduce((sum, b) => sum + b.bonusPoints, 0);
+  const label = fresh.length === 1
+    ? `Perfect week on ${fresh[0].title}!`
+    : `${fresh.length} perfect weeks!`;
+  return `
+    <button class="card card--celebrate" data-action="collect-bonus">
+      <span class="card--celebrate__burst">🎉</span>
+      <span class="card--celebrate__body">
+        <strong>${esc(label)}</strong>
+        <em>+${pts(total)} bonus points landed. Tap to celebrate!</em>
+      </span>
+    </button>`;
+}
+
 function renderToday(kid) {
   const today = todayISO();
   const due = store.choresForKid(kid.id, today);
@@ -110,6 +127,10 @@ function renderToday(kid) {
   const todo = due.filter((c) => !store.completionFor(c.id, kid.id, today));
   const settled = due.filter((c) => store.completionFor(c.id, kid.id, today));
   const streaks = store.activeStreakMap(kid.id);
+
+  // Streaks whose bonus is still winnable and which need today's chore done.
+  const atRisk = [...streaks.values()]
+    .filter((st) => st.onTrack && st.todayDue && !st.todayDone).length;
 
   const summary = `
     <section class="card card--summary">
@@ -123,7 +144,9 @@ function renderToday(kid) {
           ? 'Every chore is checked off. Nice work.'
           : progress.total === 0
             ? 'Enjoy the day off — check back tomorrow.'
-            : `You've earned ${pts(store.accumulation(kid.id).week)} points this week.`}</p>
+            : atRisk > 0
+              ? `🔥 ${plural(atRisk, 'streak is', 'streaks are')} on the line today — finish up to keep the bonus coming.`
+              : `You've earned ${pts(store.accumulation(kid.id).week)} points this week.`}</p>
       </div>
       ${flame > 0 ? `<div class="streak" title="${plural(flame, 'day', 'days')} in a row"><span>🔥</span><strong>${flame}</strong></div>` : ''}
     </section>`;
@@ -143,6 +166,7 @@ function renderToday(kid) {
   return `
     ${kidHeader(kid, greeting())}
     <div class="scroll-body">
+      ${celebrationBanner(kid)}
       ${summary}
       ${body}
     </div>`;
@@ -233,10 +257,10 @@ function renderRewards(kid) {
    save toward something big is visible instead of resetting every Sunday.
    -------------------------------------------------------------------------- */
 
-function streakRow(s) {
+function streakRow(s, savers = 0) {
   const pips = s.days.map((d) => {
-    const state = d.done ? 'is-done' : d.past ? 'is-missed' : d.isToday ? 'is-today' : '';
-    return `<i class="pip ${state}"></i>`;
+    const state = d.done ? 'is-done' : d.covered ? 'is-covered' : d.past ? 'is-missed' : d.isToday ? 'is-today' : '';
+    return `<i class="pip ${state}" ${d.covered ? 'title="Repaired with a saver"' : ''}></i>`;
   }).join('');
 
   // Missing a day that has already passed breaks the streak. Not having done
@@ -249,6 +273,10 @@ function streakRow(s) {
         ? `${s.done} of ${s.dueTotal} days · do today's to stay on track`
         : `${s.done} of ${s.dueTotal} days · on track`;
 
+  // One saver repairs one day, so only a single missed day is worth offering.
+  const fixable = s.broken && s.missedPast === 1 && savers > 0
+    && store.canRepairDay(s.kidId, s.choreId, s.firstMissedDate);
+
   const state = s.complete ? 'is-complete' : s.broken ? 'is-broken' : 'is-on-track';
   return `
     <li class="streak-row ${state}">
@@ -258,8 +286,32 @@ function streakRow(s) {
         <span class="pips">${pips}</span>
         <em>${detail}</em>
       </span>
-      <span class="streak-badge diff--${s.difficulty}">+${s.bonusPct}%</span>
+      ${fixable
+        ? `<button class="saver-btn" data-action="use-saver"
+            data-chore="${s.choreId}" data-date="${s.firstMissedDate}"
+            data-title="${esc(s.title)}">🛟 Fix it</button>`
+        : `<span class="streak-badge diff--${s.difficulty}">+${s.bonusPct}%</span>`}
     </li>`;
+}
+
+/* Derived entirely from history — badges can never get out of sync. */
+function achievements(kidId) {
+  const perfect = store.weeklyBonuses(kidId).length;
+  const life = store.lifetimePoints(kidId);
+  const flame = store.streak(kidId);
+  const redeemed = store.redemptionsFor(kidId).filter((r) => r.status === 'fulfilled').length;
+  const doneCount = store.approvedCompletions(kidId).length;
+  return [
+    { emoji: '🌱', label: 'First chore', got: doneCount >= 1 },
+    { emoji: '💪', label: '25 chores', got: doneCount >= 25 },
+    { emoji: '🔥', label: '7-day streak', got: flame >= 7 },
+    { emoji: '⚡', label: '30-day streak', got: flame >= 30 },
+    { emoji: '⭐', label: 'Perfect week', got: perfect >= 1 },
+    { emoji: '🏆', label: '5 perfect weeks', got: perfect >= 5 },
+    { emoji: '💰', label: '1,000 points', got: life >= 1000 },
+    { emoji: '🚀', label: '5,000 points', got: life >= 5000 },
+    { emoji: '🎁', label: 'First reward', got: redeemed >= 1 },
+  ];
 }
 
 function renderProgress(kid) {
@@ -269,6 +321,8 @@ function renderProgress(kid) {
   const goal = store.nextReward(kid.id);
   const streaks = store.activeStreaks(kid.id);
   const bonuses = store.weeklyBonuses(kid.id);
+  const savers = store.saversAvailable(kid.id);
+  const rescues = store.rescueCandidates(kid.id);
 
   // Chores and earned bonuses share one timeline.
   const recent = [
@@ -286,6 +340,7 @@ function renderProgress(kid) {
   return `
     ${kidHeader(kid, 'Your progress')}
     <div class="scroll-body">
+      ${celebrationBanner(kid)}
       <section class="card card--wallet">
         <p>Spendable balance</p>
         <strong>${pts(bal)}</strong>
@@ -302,10 +357,38 @@ function renderProgress(kid) {
         <div class="stat"><em>Perfect weeks</em><strong>${bonuses.length}</strong></div>
       </div>
 
+      ${rescues.length ? `
+        <h3 class="section-title">Streak rescue</h3>
+        <ul class="streak-list">
+          ${rescues.map((r) => `
+            <li class="streak-row is-rescue">
+              <span class="streak-row__emoji">${esc(r.emoji)}</span>
+              <span class="streak-row__body">
+                <strong>${esc(r.title)}</strong>
+                <em>Last week was ${r.done} of ${r.dueTotal} — one day short of +${pts(Math.round((r.basePoints * r.bonusPct) / 100))} bonus points.</em>
+              </span>
+              <button class="saver-btn" data-action="use-saver"
+                data-chore="${r.choreId}" data-date="${r.firstMissedDate}"
+                data-title="${esc(r.title)}">🛟 Rescue</button>
+            </li>`).join('')}
+        </ul>` : ''}
+
       ${streaks.length ? `
-        <h3 class="section-title">This week's streaks</h3>
-        <p class="section-note">Do a chore every day it's due and you earn bonus points on top.</p>
-        <ul class="streak-list">${streaks.map(streakRow).join('')}</ul>` : ''}
+        <div class="section-row">
+          <h3 class="section-title">This week's streaks</h3>
+          ${savers > 0 ? `<span class="saver-count" title="Streak savers">🛟 ${savers}</span>` : ''}
+        </div>
+        <p class="section-note">Do a chore every day it's due and you earn bonus points on top.${savers > 0 ? ` You have ${plural(savers, 'streak saver', 'streak savers')} — each one repairs a missed day.` : ''}</p>
+        <ul class="streak-list">${streaks.map((st) => streakRow(st, savers)).join('')}</ul>` : ''}
+
+      <h3 class="section-title">Badges</h3>
+      <ul class="badge-grid">
+        ${achievements(kid.id).map((a) => `
+          <li class="badge-tile ${a.got ? 'is-earned' : ''}" title="${esc(a.label)}">
+            <span>${a.emoji}</span>
+            <em>${esc(a.label)}</em>
+          </li>`).join('')}
+      </ul>
 
       ${goal ? `
         <h3 class="section-title">Saving toward</h3>
@@ -422,6 +505,36 @@ export async function handleKidAction(action, el, ctx) {
         toast('Request sent to your grown-up! 🎉', 'success');
       } else {
         toast("You don't have enough points for that yet", 'warn');
+      }
+    }
+    return true;
+  }
+
+  if (action === 'collect-bonus') {
+    const fresh = store.unseenBonuses(kidId);
+    const total = fresh.reduce((sum, b) => sum + b.bonusPoints, 0);
+    store.markCelebrated(kidId, fresh);
+    buzz([10, 40, 10, 40, 30]);
+    celebrate(60);
+    toast(`+${pts(total)} bonus points — amazing week! 🏆`, 'success');
+    return true;
+  }
+
+  if (action === 'use-saver') {
+    const { chore: choreId, date, title } = el.dataset;
+    const ok = await confirmSheet({
+      title: `Use a streak saver? 🛟`,
+      subtitle: `It covers the day you missed on “${title}”, so the streak keeps going and the bonus stays winnable. The missed day itself doesn't earn points.`,
+      confirmLabel: 'Use a saver',
+    });
+    if (ok) {
+      const result = store.applySaver(kidId, choreId, date);
+      if (result.ok) {
+        buzz([10, 40, 10]);
+        celebrate(30);
+        toast('Streak repaired! 🛟', 'success');
+      } else {
+        toast("That day can't be repaired", 'warn');
       }
     }
     return true;

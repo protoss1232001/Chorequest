@@ -1,6 +1,6 @@
 /* ChoreQuest service worker — offline-first for a small, fully local app. */
 
-const CACHE = 'chorequest-v1';
+const CACHE = 'chorequest-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -11,9 +11,12 @@ const ASSETS = [
   './js/util.js',
   './js/kid.js',
   './js/parent.js',
+  './js/icons.js',
+  './privacy.html',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png',
+  './icons/icon-maskable-512.png',
 ];
 
 self.addEventListener('install', (event) => {

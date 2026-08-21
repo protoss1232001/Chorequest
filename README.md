@@ -61,7 +61,37 @@ Rules that keep it honest:
 - The bonus lands when the week's last due day is done and approved.
 
 Kids see this on their **Progress** tab as a row per chore with one pip per due
-day — filled for done, hollow red for missed, outlined for still to come.
+day — filled for done, hollow red for missed, outlined for still to come, and
+ring-marked when a saver covered it.
+
+### Streak savers 🛟
+
+Life happens — a sleepover, a sick day — and one missed Tuesday shouldn't erase
+a week of effort. A **streak saver** repairs a single missed day so the streak
+and its bonus survive:
+
+- Kids **earn one saver for every flawless week** (perfect with no saver used —
+  a repaired week doesn't earn one back, or savers would be free).
+- Parents can also **grant savers** from the child's editor in Manage → Kids.
+- A saver can repair a day in the **current or previous week** only, and only a
+  day that was actually due and missed.
+- The covered day itself earns **no points** — a saver protects the habit, it
+  doesn't fake the work. A repaired 6-of-7 week pays its bonus on the 6 real
+  days.
+- When last week ended one day short, the Progress tab offers a one-tap
+  **Streak rescue** so the near-miss still pays out.
+
+### Celebrations, nudges and badges
+
+- When a perfect week's bonus lands, the child gets a **tap-to-celebrate**
+  banner with confetti — once, then it's remembered.
+- The Today screen warns when **streaks are on the line today**, so the bonus
+  is visible before it's lost rather than after.
+- A **badge wall** on Progress marks milestones (first chore, 7- and 30-day
+  streaks, perfect weeks, point totals, first reward) — all derived from
+  history, so badges can never get out of sync.
+- Parents get a **Last week** recap card on the Family tab: points, bonuses and
+  perfect weeks per child at a glance.
 
 ## Profile locks
 
@@ -153,6 +183,7 @@ iOS Safari.
 | **Deleting a chore** | Archives it. Points already earned from it stay put. |
 | **Deleting a child** | Removes their history with them. |
 | **Profile lock** | Optional per child. The parent PIN is a master key for every profile. |
+| **Streak saver** | Earned per flawless week or parent-granted. Covers a missed day for the streak; the day still earns no points. |
 
 ## Layout
 
@@ -206,11 +237,11 @@ Because every path in the app is relative, it works from a subdirectory like
 - **No notifications.** iOS web apps can do push when installed, but it is not
   wired up here.
 
-## If this ever goes to the App Store
+## Launching on the App Store and Play Store
 
-The natural next step is to wrap this same codebase with
-[Capacitor](https://capacitorjs.com), which produces a real Xcode project
-without a rewrite. That needs a Mac, an Apple Developer account ($99/year), and
-a privacy policy. If it is listed in the Kids Category, the no-IAP and
-no-outbound-links rules above become hard requirements — which is why the app is
-already built to respect them.
+See **[STORE.md](./STORE.md)** for the full path: Android via a Trusted Web
+Activity (Bubblewrap, no code changes), iPhone via Capacitor (needs a Mac),
+the Kids-category rules both stores apply, and the store-required
+[privacy policy](./privacy.html) that ships with the app.
+
+

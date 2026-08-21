@@ -95,6 +95,12 @@ function seedState() {
     })),
     completions: [],
     redemptions: [],
+    // Streak savers: grants are given by a parent, uses repair one missed day.
+    // Both are event lists so every balance stays derivable from history.
+    saverGrants: [],
+    saverUses: [],
+    // Perfect-week celebrations the kid has already seen, keyed per bonus.
+    celebrated: {},
   };
 }
 
@@ -201,6 +207,8 @@ export function removeKid(id) {
     s.kids = s.kids.filter((k) => k.id !== id);
     s.completions = s.completions.filter((c) => c.kidId !== id);
     s.redemptions = s.redemptions.filter((r) => r.kidId !== id);
+    s.saverGrants = s.saverGrants.filter((g) => g.kidId !== id);
+    s.saverUses = s.saverUses.filter((u) => u.kidId !== id);
     s.chores.forEach((chore) => {
       if (Array.isArray(chore.assignment)) {
         chore.assignment = chore.assignment.filter((kidId) => kidId !== id);
@@ -478,6 +486,12 @@ export const streakBonusPct = (chore) => {
   return Number(configured ?? difficultyOf(chore).bonus ?? 0);
 };
 
+function saverIndex(kidId) {
+  return memo(`sv:${kidId}`, () => new Set(
+    state.saverUses.filter((u) => u.kidId === kidId).map((u) => `${u.choreId}|${u.date}`),
+  ));
+}
+
 function approvedIndex(kidId) {
   return memo(`idx:${kidId}`, () => {
     const map = new Map();
@@ -493,7 +507,7 @@ function approvedIndex(kidId) {
  * `dueTotal` spans the whole week; `dueSoFar` stops at today, so the current
  * week can show honest progress without counting days that haven't happened.
  */
-export function choreWeekStreak(chore, kidId, weekStart, index = approvedIndex(kidId)) {
+export function choreWeekStreak(chore, kidId, weekStart, index = approvedIndex(kidId), covered = saverIndex(kidId)) {
   const today = todayISO();
   const bornOn = (chore.createdAt || '').slice(0, 10);
   const retiredOn = chore.archivedAt ? chore.archivedAt.slice(0, 10) : null;
@@ -510,27 +524,33 @@ export function choreWeekStreak(chore, kidId, weekStart, index = approvedIndex(k
   }
 
   const doneDays = dueSoFar.filter((iso) => index.has(`${chore.id}|${iso}`));
+  // A saver covers a missed day for the streak, but only real work earns
+  // points — the bonus is a percentage of what was actually done.
   const basePoints = doneDays.reduce((sum, iso) => sum + index.get(`${chore.id}|${iso}`).points, 0);
   const bonusPct = streakBonusPct(chore);
   const eligible = isAssignedTo(chore, kidId) && dueAll.length >= MIN_STREAK_DAYS;
-  const complete = eligible && doneDays.length === dueAll.length;
 
-  // Per-day detail, so the UI can show which day was actually missed rather
-  // than just a count.
   const days = dueAll.map((iso) => ({
     date: iso,
     done: index.has(`${chore.id}|${iso}`),
+    covered: covered.has(`${chore.id}|${iso}`),
     past: iso < today,
     isToday: iso === today,
   }));
 
+  const counted = days.filter((d) => d.done || d.covered).length;
+  const usedSaver = days.some((d) => d.covered);
+  const complete = eligible && counted === dueAll.length;
+
   // Only a missed day that has already passed breaks a streak. Not having done
   // today's chore yet is not a failure — the day isn't over.
-  const missedPast = days.filter((d) => d.past && !d.done).length;
+  const missedPastDays = days.filter((d) => d.past && !d.done && !d.covered);
+  const missedPast = missedPastDays.length;
   const todayEntry = days.find((d) => d.isToday) || null;
 
   return {
     choreId: chore.id,
+    kidId,
     title: chore.title,
     emoji: chore.emoji,
     difficulty: chore.difficulty || 'medium',
@@ -541,6 +561,12 @@ export function choreWeekStreak(chore, kidId, weekStart, index = approvedIndex(k
     days,
     eligible,
     complete,
+    usedSaver,
+    // Flawless means perfect without a saver — the only kind that earns one,
+    // otherwise a saver would refund itself every week.
+    flawless: complete && !usedSaver,
+    missedPast,
+    firstMissedDate: missedPastDays[0]?.date || null,
     broken: eligible && missedPast > 0,
     todayDue: Boolean(todayEntry),
     todayDone: Boolean(todayEntry?.done),
@@ -669,6 +695,102 @@ export function todayProgress(kidId) {
 export function nextReward(kidId) {
   const have = balance(kidId);
   return rewards().find((r) => r.cost > have) || null;
+}
+
+/* --------------------------------------------------------------------------
+   Streak savers.
+
+   A saver (one per kid, stackable) repairs a single missed day so the week's
+   streak — and its bonus — survives. Kids earn one for every flawless week;
+   parents can also grant them. The missed day itself still earns no points:
+   a saver protects the habit, it doesn't fake the work.
+   -------------------------------------------------------------------------- */
+
+export const flawlessWeeks = (kidId) =>
+  weeklyBonuses(kidId).filter((b) => b.flawless).length;
+
+export function saversAvailable(kidId) {
+  const granted = state.saverGrants.filter((g) => g.kidId === kidId).length;
+  const used = state.saverUses.filter((u) => u.kidId === kidId).length;
+  return Math.max(0, flawlessWeeks(kidId) + granted - used);
+}
+
+export function grantSaver(kidId) {
+  if (!getKid(kidId)) return;
+  update((s) => s.saverGrants.push({ id: uid('sgr'), kidId, createdAt: new Date().toISOString() }));
+}
+
+/** Is this specific day repairable right now? Shared by apply and the UI. */
+export function canRepairDay(kidId, choreId, dateISO) {
+  const chore = getChore(choreId);
+  if (!chore || !isAssignedTo(chore, kidId)) return false;
+  const today = todayISO();
+  if (dateISO >= today) return false;                       // only a day already lost
+  // Repairs reach back to the start of the previous week, so a Sunday-night
+  // miss can still be rescued on Monday morning — but ancient history can't.
+  const floor = toISO(addDays(startOfWeek(new Date(), state.settings.weekStart), -7));
+  if (dateISO < floor) return false;
+  if (!isScheduledOn(chore, dateISO)) return false;          // must be a scheduled day
+  if (completionFor(choreId, kidId, dateISO)) return false;  // already done
+  return !state.saverUses.some((u) => u.kidId === kidId && u.choreId === choreId && u.date === dateISO);
+}
+
+export function applySaver(kidId, choreId, dateISO) {
+  if (saversAvailable(kidId) <= 0) return { ok: false, reason: 'none' };
+  if (!canRepairDay(kidId, choreId, dateISO)) return { ok: false, reason: 'invalid' };
+  update((s) => s.saverUses.push({
+    id: uid('sus'), kidId, choreId, date: dateISO, createdAt: new Date().toISOString(),
+  }));
+  return { ok: true };
+}
+
+/**
+ * Last week's near-misses: one repairable day away from the bonus. These are
+ * the moments a saver matters most, so the UI offers them explicitly.
+ */
+export function rescueCandidates(kidId) {
+  if (saversAvailable(kidId) <= 0) return [];
+  const lastWeek = addDays(startOfWeek(new Date(), state.settings.weekStart), -7);
+  const index = approvedIndex(kidId);
+  const covered = saverIndex(kidId);
+  return state.chores
+    .filter((c) => !c.archived && isAssignedTo(c, kidId))
+    .map((c) => choreWeekStreak(c, kidId, lastWeek, index, covered))
+    .filter((w) => w.eligible && !w.complete && w.missedPast === 1
+      && canRepairDay(kidId, w.choreId, w.firstMissedDate));
+}
+
+/* --------------------------------------------------------------------------
+   Perfect-week celebrations — shown to the kid once, then remembered.
+   -------------------------------------------------------------------------- */
+
+const bonusKey = (kidId, b) => `${kidId}|${b.choreId}|${b.weekStart}`;
+
+export function unseenBonuses(kidId) {
+  // Old bonuses from an imported backup shouldn't trigger a confetti backlog.
+  const horizon = toISO(addDays(new Date(), -14));
+  return weeklyBonuses(kidId).filter((b) =>
+    b.earnedOn >= horizon && !state.celebrated[bonusKey(kidId, b)]);
+}
+
+export function markCelebrated(kidId, bonuses) {
+  if (!bonuses.length) return;
+  update((s) => bonuses.forEach((b) => { s.celebrated[bonusKey(kidId, b)] = true; }));
+}
+
+/* --------------------------------------------------------------------------
+   Last week in one line, for the parent's recap card.
+   -------------------------------------------------------------------------- */
+
+export function lastWeekRecap(kidId) {
+  const thisStart = toISO(startOfWeek(new Date(), state.settings.weekStart));
+  const lastStart = toISO(addDays(startOfWeek(new Date(), state.settings.weekStart), -7));
+  const base = approvedCompletions(kidId)
+    .filter((c) => c.date >= lastStart && c.date < thisStart)
+    .reduce((sum, c) => sum + c.points, 0);
+  const weeks = weeklyBonuses(kidId).filter((b) => b.weekStart === lastStart);
+  const bonus = weeks.reduce((sum, b) => sum + b.bonusPoints, 0);
+  return { points: base + bonus, base, bonus, perfect: weeks.length };
 }
 
 /* --------------------------------------------------------------------------

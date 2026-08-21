@@ -151,5 +151,87 @@ console.log('\n— per-day detail lines up with the week —');
   is('all in the past', past.days.every((d) => d.past), true);
 }
 
+
+/* ---- streak savers ------------------------------------------------------- */
+
+console.log('\n— a flawless week earns a saver —');
+seed([chore('daily10')], weekDays(lastWeek).map((d) => done('daily10', d, 10)));
+is('one saver available', store.saversAvailable('k1'), 1);
+is('the week is flawless', store.weeklyBonuses('k1')[0].flawless, true);
+
+console.log('\n— a saver repairs a 6/7 week and the bonus lands —');
+{
+  const days = weekDays(lastWeek);
+  seed([chore('daily10')], days.slice(1).map((d) => done('daily10', d, 10)));
+  is('no saver, no bonus', store.bonusPointsTotal('k1'), 0);
+  store.getState().saverGrants.push({ id: 'g1', kidId: 'k1', createdAt: days[0] });
+  is('granted saver is available', store.saversAvailable('k1'), 1);
+  const res = store.applySaver('k1', 'daily10', days[0]);
+  is('saver applies', res.ok, true);
+  is('saver is spent', store.saversAvailable('k1'), 0);
+  // 6 real days x 10 = 60 base; medium 25% => 15 bonus. The covered day earns nothing.
+  is('bonus computed on real work only', store.bonusPointsTotal('k1'), 15);
+  const week = store.weeklyBonuses('k1')[0];
+  is('repaired week is complete but not flawless', [week.complete, week.flawless], [true, false]);
+  is('a repaired week does not earn a saver back', store.saversAvailable('k1'), 0);
+}
+
+console.log('\n— savers refuse invalid days —');
+{
+  const days = weekDays(lastWeek);
+  seed([chore('daily10')], days.slice(1).map((d) => done('daily10', d, 10)));
+  store.getState().saverGrants.push({ id: 'g1', kidId: 'k1', createdAt: days[0] });
+  is('cannot repair a day already done', store.applySaver('k1', 'daily10', days[1]).ok, false);
+  is('cannot repair today or the future', store.applySaver('k1', 'daily10', toISO(new Date())).ok, false);
+  is('cannot repair ancient history', store.applySaver('k1', 'daily10', toISO(addDays(lastWeek, -14))).ok, false);
+  store.applySaver('k1', 'daily10', days[0]);
+  is('cannot cover the same day twice', store.applySaver('k1', 'daily10', days[0]).ok, false);
+}
+{
+  seed([chore('daily10')], []);
+  is('no savers means no repair', store.applySaver('k1', 'daily10', toISO(lastWeek)).ok, false);
+}
+{
+  seed([chore('weekly1', { repeat: 'weekly', days: [lastWeek.getDay()] })], []);
+  store.getState().saverGrants.push({ id: 'g1', kidId: 'k1', createdAt: 'x' });
+  const offDay = toISO(addDays(lastWeek, 1));
+  is('cannot repair a day the chore was not due', store.applySaver('k1', 'weekly1', offDay).ok, false);
+}
+
+console.log('\n— rescue offers surface last week\'s near-misses —');
+{
+  const days = weekDays(lastWeek);
+  seed([chore('daily10')], days.slice(1).map((d) => done('daily10', d, 10)));
+  is('no saver, no offer', store.rescueCandidates('k1').length, 0);
+  store.getState().saverGrants.push({ id: 'g1', kidId: 'k1', createdAt: days[0] });
+  const offers = store.rescueCandidates('k1');
+  is('one rescue offered', offers.length, 1);
+  is('it names the missed day', offers[0].firstMissedDate, days[0]);
+  store.applySaver('k1', 'daily10', days[0]);
+  is('offer disappears once repaired', store.rescueCandidates('k1').length, 0);
+}
+{
+  const days = weekDays(lastWeek);
+  seed([chore('daily10')], days.slice(2).map((d) => done('daily10', d, 10)));
+  store.getState().saverGrants.push({ id: 'g1', kidId: 'k1', createdAt: days[0] });
+  is('two missed days is not a one-saver rescue', store.rescueCandidates('k1').length, 0);
+}
+
+console.log('\n— celebrations are shown once —');
+{
+  seed([chore('daily10')], weekDays(lastWeek).map((d) => done('daily10', d, 10)));
+  const fresh = store.unseenBonuses('k1');
+  is('new bonus awaits celebration', fresh.length, 1);
+  store.markCelebrated('k1', fresh);
+  is('celebrated bonus stays seen', store.unseenBonuses('k1').length, 0);
+}
+
+console.log('\n— last week recap adds up —');
+{
+  seed([chore('daily10')], weekDays(lastWeek).map((d) => done('daily10', d, 10)));
+  const r = store.lastWeekRecap('k1');
+  is('recap totals base + bonus', [r.base, r.bonus, r.points, r.perfect], [70, 18, 88, 1]);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
